@@ -61,6 +61,9 @@ def load_data(train_file, valid_file, test_file):
 
     for word in train:
         word_maxlen = word_maxlen if word_maxlen>len(word) else len(word)
+        if word == '<unk>':
+            continue
+
         if word2id.get(word) == None:
             word2id[word] = len(word2id)
             id2word.append(word)
@@ -74,25 +77,40 @@ def load_data(train_file, valid_file, test_file):
     word_train = []
     wordlen_train = []
     for word in train:
-        word_train.append(word2id.get(word))
-        char_train.append(char_index(word))
-        wordlen_train.append(len(word))
+        if word == '<unk>':
+            word_train.append(1)
+            char_train.append([1] + [0]*(word_maxlen-1))
+            wordlen_train.append(1)
+        else:
+            word_train.append(word2id.get(word))
+            char_train.append(char_index(word))
+            wordlen_train.append(len(word))
 
     char_valid = []
     word_valid = []
     wordlen_valid = []
     for word in valid:
-        word_valid.append(word2id.get(word))
-        char_valid.append(char_index(word))
-        wordlen_valid.append(len(word))
+        if word == '<unk>':
+            word_valid.append(1)
+            char_valid.append([1] + [0]*(word_maxlen-1))
+            wordlen_valid.append(1)
+        else:
+            word_valid.append(word2id.get(word))
+            char_valid.append(char_index(word))
+            wordlen_valid.append(len(word))
 
     char_test = []
     word_test = []
     wordlen_test = []
     for word in test:
-        word_test.append(word2id.get(word))
-        char_test.append(char_index(word))
-        wordlen_test.append(len(word))
+        if word == '<unk>':
+            word_test.append(1)
+            char_test.append([1] + [0]*(word_maxlen-1))
+            wordlen_test.append(1)
+        else:
+            word_test.append(word2id.get(word))
+            char_test.append(char_index(word))
+            wordlen_test.append(len(word))
 
     return word2id, id2word, char2id, id2char, word_maxlen, word_train, word_valid, word_test, char_train, char_valid, char_test, wordlen_train, wordlen_valid, wordlen_test
 
@@ -100,13 +118,11 @@ def train_batch_iter(data, batch_size, time_step):
     data = np.array(data, dtype=object)
     data_size = len(data)
     num_batches = int((data_size-time_step)/batch_size) + (1 if ((data_size-time_step)%batch_size)!=0 else 0)
-    shuffle_indices = np.random.permutation(np.arange(data_size))
-    shuffled_data = data[shuffle_indices]
     for batch_num in xrange(num_batches):
         start_index = batch_num * batch_size
         end_index = min(start_index + batch_size + time_step, data_size)
         # How to seperate each batches
-        yield shuffled_data[start_index:end_index]
+        yield data[start_index:end_index]
 
 def validation_batch_iter(data, batch_size, time_step):
     data = np.asarray(data, dtype=object)
@@ -115,4 +131,23 @@ def validation_batch_iter(data, batch_size, time_step):
     for batch_num in xrange(num_batches):
         start_index = batch_num * batch_size
         end_index = min(start_index + batch_size + time_step, data_size)
+        yield data[start_index:end_index]
+
+def test_train_batch_iter(data, batch_size):
+    data = np.array(data, dtype=object)
+    data_size = len(data)
+    num_batches = int(data_size/batch_size) + 1
+    for batch_num in xrange(num_batches):
+        start_index = batch_num * batch_size
+        end_index = min(start_index + batch_size, data_size)
+        # How to seperate each batches
+        yield data[start_index:end_index]
+
+def test_validation_batch_iter(data, batch_size, time_step):
+    data = np.asarray(data, dtype=object)
+    data_size = len(data)
+    num_batches = int(data_size/batch_size) + 1
+    for batch_num in xrange(num_batches):
+        start_index = batch_num * batch_size
+        end_index = min(start_index + batch_size, data_size)
         yield data[start_index:end_index]
