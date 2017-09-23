@@ -110,7 +110,7 @@ class LSTM(nn.Module):
 
         # modules:
         # dropout=0.5
-        self.lstm = nn.LSTM(self.in_features, self.out_features, self.num_layers)
+        self.lstm = nn.LSTM(self.in_features, self.out_features, self.num_layers, dropout=0.5)
 
     def forward(self, x):
         # Need to seperate by time_step
@@ -272,9 +272,3 @@ print("Training End..")
 print("Test: ")
 test_batches = data_loader.validation_batch_iter(list(zip(word_test, char_test, wordlen_test)), batch_size, time_step)
 print_score(test_batches, step=3)
-
-torch.save(cnn_models.state_dict(), 'cnn.pkl')
-torch.save(hw_model.state_dict(), 'hw.pkl')
-torch.save(lstm_model.state_dict(), 'lstm.pkl')
-torch.save(nll_model.state_dict(), 'nll.pkl')
-

@@ -143,7 +143,7 @@ def test_train_batch_iter(data, batch_size):
         # How to seperate each batches
         yield data[start_index:end_index]
 
-def test_validation_batch_iter(data, batch_size, time_step):
+def test_validation_batch_iter(data, batch_size):
     data = np.asarray(data, dtype=object)
     data_size = len(data)
     num_batches = int(data_size/batch_size) + 1

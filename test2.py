@@ -30,9 +30,9 @@ sum_h = sum(cnn_h)
 # Training Parameters
 batch_size = 20
 time_step = 35
-num_epochs = 6
-learning_rate = 1.0 
-evaluate_every = 3
+num_epochs = 35
+learning_rate = 0.015
+evaluate_every = 5
 
 # Data Preparation
 # ===========================================================
@@ -107,7 +107,7 @@ class LSTM(nn.Module):
 
         # modules:
         # dropout=0.5
-        self.lstm = nn.LSTM(self.in_features, self.out_features, self.num_layers)
+        self.lstm = nn.LSTM(self.in_features, self.out_features, self.num_layers, dropout=0.5)
 
     def forward(self, x, hn):
         # Need to seperate by time_step
@@ -129,7 +129,7 @@ class NLL(nn.Module):
 
         # modules:
         self.linear = nn.Linear(self.in_features, self.V)
-        self.crossentropy = nn.CrossEntropyLoss(size_average=False)
+        self.crossentropy = nn.CrossEntropyLoss() #size_average=False)
         self.logsoftmax = nn.LogSoftmax()
         self.nnl = nn.NLLLoss()
 
@@ -191,32 +191,29 @@ def run(word_embed, char_embed, word_len, step):
 
     # NLL
     # batch * (25*kernel_size) -> 1
-    batch_NLL = nll_model(h, word_embed)
-    NLL = batch_NLL/len(word_embed)
+    NLL = nll_model(h, word_embed)
+    PPL = np.exp(NLL.data.cpu().numpy()[0])
 
     if (step != 1):
-        return batch_NLL.data.cpu().numpy()[0]
+        return PPL 
 
     NLL.backward()
     optimizer.step()
     
-    return batch_NLL.data.cpu().numpy()[0]
+    return PPL 
 
 def print_score(batches, step):
-    total_nll = 0.0
+    total_ppl = 0.0
+    batch_cnt = 0
 
     for batch in batches:
         word_batch, char_batch, wordlen_batch = zip(*batch)
-        batch_nll = run(word_batch, char_batch, wordlen_batch, step=step)
-        total_nll += batch_nll
-
-    if step == 2:
-        len_word = len(word_valid)
-    elif step == 3:
-        len_word = len(word_test)
+        batch_ppl = run(word_batch, char_batch, wordlen_batch, step=step)
+        total_ppl += batch_ppl
+        batch_cnt += 1
 
     # Need to Front padding
-    return np.exp(total_nll/len_word)
+    return (total_ppl/batch_cnt)
 
 ###############################################################################################
 char_weight = nn.Embedding(len(id2char), cnn_d).type(gtype)
@@ -233,12 +230,12 @@ for i in xrange(num_epochs):
     train_batches = data_loader.test_train_batch_iter(list(zip(word_train, char_train, wordlen_train)), batch_size)
     h0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
     c0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
-    batch_nll = 0.
+    batch_ppl = 0.
     for j, train_batch in enumerate(train_batches):
         word_batch, char_batch, wordlen_batch = zip(*train_batch)
-        batch_nll += run(word_batch, char_batch, wordlen_batch, step=1)
+        batch_ppl += run(word_batch, char_batch, wordlen_batch, step=1)
         if (j+1) % 5000 == 0:
-            print("batch #{:d}: ".format(j+1)), "batch_ppl :", np.exp(batch_nll/j/batch_size), datetime.datetime.now()
+            print("batch #{:d}: ".format(j+1)), "batch_ppl :", (batch_ppl/j), datetime.datetime.now()
 
     print("epoch #{:d}".format(i+1)), "lr :", learning_rate, datetime.datetime.now()
     # Validation 
@@ -262,8 +259,3 @@ print("Test: ")
 test_batches = data_loader.test_validation_batch_iter(list(zip(word_test, char_test, wordlen_test)), batch_size)
 PPL = print_score(test_batches, step=3)
 print PPL
-
-torch.save(cnn_models.state_dict(), 'cnn.pkl')
-torch.save(hw_model.state_dict(), 'hw.pkl')
-torch.save(lstm_model.state_dict(), 'lstm.pkl')
-torch.save(nll_model.state_dict(), 'nll.pkl')
