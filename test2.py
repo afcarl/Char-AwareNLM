@@ -31,8 +31,11 @@ sum_h = sum(cnn_h)
 batch_size = 20
 time_step = 35
 num_epochs = 35
-learning_rate = 0.015
+learning_rate = 1.
 evaluate_every = 5
+
+min_ppl = 0.
+min_lr = 0.
 
 # Data Preparation
 # ===========================================================
@@ -129,7 +132,7 @@ class NLL(nn.Module):
 
         # modules:
         self.linear = nn.Linear(self.in_features, self.V)
-        self.crossentropy = nn.CrossEntropyLoss() #size_average=False)
+        self.crossentropy = nn.CrossEntropyLoss(size_average=False)
         self.logsoftmax = nn.LogSoftmax()
         self.nnl = nn.NLLLoss()
 
@@ -191,29 +194,44 @@ def run(word_embed, char_embed, word_len, step):
 
     # NLL
     # batch * (25*kernel_size) -> 1
-    NLL = nll_model(h, word_embed)
-    PPL = np.exp(NLL.data.cpu().numpy()[0])
+    batch_NLL = nll_model(h, word_embed)
+    NLL = batch_NLL/len(word_embed)
 
     if (step != 1):
-        return PPL 
+        return batch_NLL.data.cpu().numpy()[0]
 
     NLL.backward()
     optimizer.step()
     
-    return PPL 
+    return batch_NLL.data.cpu().numpy()[0] 
 
 def print_score(batches, step):
-    total_ppl = 0.0
-    batch_cnt = 0
+    global min_ppl, min_lr, learning_rate, optimizer
+    total_nll = 0.0
 
     for batch in batches:
         word_batch, char_batch, wordlen_batch = zip(*batch)
-        batch_ppl = run(word_batch, char_batch, wordlen_batch, step=step)
-        total_ppl += batch_ppl
-        batch_cnt += 1
+        batch_nll = run(word_batch, char_batch, wordlen_batch, step=step)
+        total_nll += batch_nll
+
+    if step == 2:
+        len_word = len(word_valid)
+    elif step == 3:
+        len_word = len(word_test)
 
     # Need to Front padding
-    return (total_ppl/batch_cnt)
+    PPL = np.exp(total_nll/len_word)
+
+    # New learning rate
+    if PPL < min_ppl:
+        min_ppl = PPL
+        min_lr = learning_rate
+        learning_rate = learning_rate*1.25
+    else:
+        learning_rate = learning_rate*0.5
+    optimizer = torch.optim.SGD(parameters(), lr=learning_rate)
+
+    print("ppl: ", PPL)
 
 ###############################################################################################
 char_weight = nn.Embedding(len(id2char), cnn_d).type(gtype)
@@ -230,12 +248,12 @@ for i in xrange(num_epochs):
     train_batches = data_loader.test_train_batch_iter(list(zip(word_train, char_train, wordlen_train)), batch_size)
     h0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
     c0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
-    batch_ppl = 0.
+    batch_nll = 0.
     for j, train_batch in enumerate(train_batches):
         word_batch, char_batch, wordlen_batch = zip(*train_batch)
-        batch_ppl += run(word_batch, char_batch, wordlen_batch, step=1)
+        batch_nll += run(word_batch, char_batch, wordlen_batch, step=1)
         if (j+1) % 5000 == 0:
-            print("batch #{:d}: ".format(j+1)), "batch_ppl :", (batch_ppl/j), datetime.datetime.now()
+            print("batch #{:d}: ".format(j+1)), "batch_ppl :", np.exp(batch_nll/j/batch_size), datetime.datetime.now()
 
     print("epoch #{:d}".format(i+1)), "lr :", learning_rate, datetime.datetime.now()
     # Validation 
@@ -243,8 +261,7 @@ for i in xrange(num_epochs):
         print("=======================")
         print("Evaluation at epoch #{:d}: ".format(i+1))
         validation_batches = data_loader.test_validation_batch_iter(list(zip(word_valid, char_valid, wordlen_valid)),batch_size)
-        PPL = print_score(validation_batches, step=2)
-        print PPL
+        print_score(validation_batches, step=2)
 
 cnn_models.eval()
 hw_model.eval()
@@ -257,5 +274,4 @@ print("=======================")
 print("Training End..")
 print("Test: ")
 test_batches = data_loader.test_validation_batch_iter(list(zip(word_test, char_test, wordlen_test)), batch_size)
-PPL = print_score(test_batches, step=3)
-print PPL
+print_score(test_batches, step=3)
