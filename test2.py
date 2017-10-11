@@ -28,14 +28,12 @@ sum_h = sum(cnn_h)
 #wd## = [0 : UNK, 1 : END]
 
 # Training Parameters
-batch_size = 20
-time_step = 35
+batch_size = 35 
 num_epochs = 35
 learning_rate = 1.
 evaluate_every = 5
 
-min_ppl = 0.
-min_lr = 0.
+ex_ppl = 9999.
 
 # Data Preparation
 # ===========================================================
@@ -43,16 +41,18 @@ min_lr = 0.
 print("Loading data...")
 word2id, id2word, char2id, id2char, word_maxlen, word_train, word_valid, word_test, char_train, char_valid, char_test, wordlen_train, wordlen_valid, wordlen_test = data_loader.load_data(train_file, valid_file, test_file)
 
+# Target word preprcessing
 word_train = list(word_train)[1:]+[0] # 0 : END
 word_valid = list(word_valid)[1:]+[0] # 0 : END
 word_test = list(word_test)[1:]+[0] # 0 : END
 print("Train/Validation/Test: {:d}/{:d}/{:d}".format(len(word_train), len(word_valid), len(word_test)))
 #print("==================================================================================")
+###############################################################################################
 
 class Conv2d(nn.Module):
-    # input : (batch + time_step) * cnn_d * word_maxlen
-    # torch.max( (batch + time_step) * (25*kernel_size) * (word_maxlen-kernel_size+1)
-    # output : (batch + time_step) * (25*kernel_size)
+    # input : (batch) * cnn_d * word_maxlen
+    # torch.max( (batch) * (25*kernel_size) * (word_maxlen-kernel_size+1)
+    # output : (batch) * (25*kernel_size)
     def __init__(self, kernel_sizes, in_channels=cnn_d):
         super(Conv2d, self).__init__()
 
@@ -104,12 +104,11 @@ class LSTM(nn.Module):
 
         # attributes:
         self.in_features = in_features
-        # self.hidden_features = 300
+        self.hidden_features = 300
         self.out_features = in_features 
         self.num_layers = 2
 
         # modules:
-        # dropout=0.5
         self.lstm = nn.LSTM(self.in_features, self.out_features, self.num_layers, dropout=0.5)
 
     def forward(self, x, hn):
@@ -132,27 +131,20 @@ class NLL(nn.Module):
 
         # modules:
         self.linear = nn.Linear(self.in_features, self.V)
+        # Have to size_average=False
         self.crossentropy = nn.CrossEntropyLoss(size_average=False)
-        self.logsoftmax = nn.LogSoftmax()
-        self.nnl = nn.NLLLoss()
 
     def forward(self, h, word_embed):
         hp = self.linear(h)
-        #NLL = self.logsoftmax(hp)
-        #mask = Variable(torch.eye(len(id2word))[word_embed[time_step:]])
-        #NLL = torch.sum(torch.mul(NLL, mask), dim=1)
-
         word_embed = Variable(word_embed).cuda()
         NLL = self.crossentropy(hp, word_embed)
 
         return NLL
 
 def parameters():
-
     params = []
     for model in [cnn_models, hw_model, lstm_model, nll_model]:
         params += list(model.parameters())
-
     return params
 
 def make_charmask(word_maxlen, cnn_d, word_len):
@@ -162,10 +154,11 @@ def make_charmask(word_maxlen, cnn_d, word_len):
     for c in word_len:
         words.append(one*c + zero*(word_maxlen-c))
 
-    # (batch + time_step) * word_maxlen * cnn_d
+    # (batch) * word_maxlen * cnn_d
     # [[1 1 1 ... 1 0 0 0 ... 0]...]
     return Variable(torch.from_numpy(np.asarray(words)).type(gtype), requires_grad=False)
 
+###############################################################################################
 def run(word_embed, char_embed, word_len, step):
 
     global h0, c0
@@ -206,9 +199,11 @@ def run(word_embed, char_embed, word_len, step):
     return batch_NLL.data.cpu().numpy()[0] 
 
 def print_score(batches, step):
-    global min_ppl, min_lr, learning_rate, optimizer
+    global ex_ppl, learning_rate, optimizer
     total_nll = 0.0
 
+    h0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
+    c0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
     for batch in batches:
         word_batch, char_batch, wordlen_batch = zip(*batch)
         batch_nll = run(word_batch, char_batch, wordlen_batch, step=step)
@@ -219,17 +214,14 @@ def print_score(batches, step):
     elif step == 3:
         len_word = len(word_test)
 
-    # Need to Front padding
+    # No Front padding
     PPL = np.exp(total_nll/len_word)
 
     # New learning rate
-    if PPL < min_ppl:
-        min_ppl = PPL
-        min_lr = learning_rate
-        learning_rate = learning_rate*1.25
-    else:
+    if PPL+1 > ex_ppl:
         learning_rate = learning_rate*0.5
-    optimizer = torch.optim.SGD(parameters(), lr=learning_rate)
+        optimizer = torch.optim.SGD(parameters(), lr=learning_rate)
+    ex_ppl = PPL
 
     print("ppl: ", PPL)
 
@@ -239,12 +231,12 @@ char_weight = nn.Embedding(len(id2char), cnn_d).type(gtype)
 cnn_models = Conv2d(cnn_w).cuda()
 hw_model = HW(sum_h).cuda()
 lstm_model = LSTM(sum_h).cuda()
-
 nll_model = NLL(sum_h).cuda()
 optimizer = torch.optim.SGD(parameters(), lr=learning_rate)
 
 for i in xrange(num_epochs):
     # Training
+    # Every 35 words
     train_batches = data_loader.test_train_batch_iter(list(zip(word_train, char_train, wordlen_train)), batch_size)
     h0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
     c0 = Variable(torch.zeros(2, 1, sum_h)).cuda()
@@ -255,19 +247,17 @@ for i in xrange(num_epochs):
         if (j+1) % 5000 == 0:
             print("batch #{:d}: ".format(j+1)), "batch_ppl :", np.exp(batch_nll/j/batch_size), datetime.datetime.now()
 
-    print("epoch #{:d}".format(i+1)), "lr :", learning_rate, datetime.datetime.now()
     # Validation 
-    if (i+1) % evaluate_every == 0:
-        print("=======================")
-        print("Evaluation at epoch #{:d}: ".format(i+1))
-        validation_batches = data_loader.test_validation_batch_iter(list(zip(word_valid, char_valid, wordlen_valid)),batch_size)
-        print_score(validation_batches, step=2)
+    # In every epoch (for updating a learning rate)
+    print("=======================")
+    print("Evaluation at epoch #{:d}: ".format(i+1))
+    validation_batches = data_loader.test_validation_batch_iter(list(zip(word_valid, char_valid, wordlen_valid)),batch_size)
+    print_score(validation_batches, step=2)
 
 cnn_models.eval()
 hw_model.eval()
 lstm_model.eval()
 nll_model.eval()
-optimizer = torch.optim.SGD(parameters(), lr=learning_rate)
 
 # Testing
 print("=======================")
