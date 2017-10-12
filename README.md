@@ -29,10 +29,10 @@ in LSTM, zero init always
 --------
 | ↑  | ↑  | ↑  | ↑   | ↑   | ↑   | ↑   |
 |----|----|----|-----|-----|-----|-----|
-| i0 | i1 | i2 | ... | ... | i18 | i19 |
+| i0 | i1 | i2 | ... | ... | i33 | i34 |
 
 in LSTM, init to last lstm's output
 
-**output ppl : 156.011** 
+**output ppl : 140.813** 
 
 >There is no padding before i0
